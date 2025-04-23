@@ -24,7 +24,7 @@
 #include <signal.h>
 #endif
 
-//volatile, because of signal being an interrupt
+// volatile, because of signal being an interrupt
 static volatile bool g_is_generating = false;
 static volatile bool g_is_interrupted = false;
 
