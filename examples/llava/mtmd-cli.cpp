@@ -302,7 +302,7 @@ int main(int argc, char ** argv) {
         if (eval_message(ctx, msg, params.image, true)) {
             return 1;
         }
-        if (g_is_interrupted && generate_response(ctx, smpl, n_predict)) {
+        if (!g_is_interrupted && generate_response(ctx, smpl, n_predict)) {
             return 1;
         }
 
