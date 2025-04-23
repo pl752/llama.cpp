@@ -26,7 +26,7 @@
 
 //volatile, because of signal being an interrupt
 static volatile bool g_is_generating = false;
-static volatile bool is_app_running = true;
+static volatile bool g_is_interrupted = false;
 
 /**
  * Please note that this is NOT a production-ready stuff.
@@ -52,10 +52,10 @@ static void sigint_handler(int signo) {
             g_is_generating = false;
         } else {
             console::cleanup();
-            if(!is_app_running) {
+            if (g_is_interrupted) {
                 _exit(1);
             }
-            is_app_running = false;
+            g_is_interrupted = true;
         }
     }
 }
@@ -171,7 +171,7 @@ struct decode_embd_batch {
 static int generate_response(mtmd_cli_context & ctx, common_sampler * smpl, int n_predict) {
     llama_tokens generated_tokens;
     for (int i = 0; i < n_predict; i++) {
-        if (i > n_predict || !g_is_generating || !is_app_running) {
+        if (i > n_predict || !g_is_generating || g_is_interrupted) {
             printf("\n");
             break;
         }
@@ -188,7 +188,7 @@ static int generate_response(mtmd_cli_context & ctx, common_sampler * smpl, int 
         printf("%s", common_token_to_piece(ctx.lctx, token_id).c_str());
         fflush(stdout);
 
-        if(!is_app_running) {
+        if (g_is_interrupted) {
             printf("\n");
             break;
         }
@@ -215,7 +215,7 @@ static int eval_message(mtmd_cli_context & ctx, common_chat_msg & msg, std::vect
     LOG_DBG("formatted_chat.prompt: %s\n", formatted_chat.prompt.c_str());
 
     for (auto & fname : images_fname) {
-        if(!is_app_running) return 0;
+        if (g_is_interrupted) return 0;
         mtmd_bitmap bitmap;
         if (mtmd_helper_bitmap_init_from_file(fname.c_str(), bitmap)) {
             LOG_ERR("Unable to load image %s\n", fname.c_str());
@@ -230,7 +230,7 @@ static int eval_message(mtmd_cli_context & ctx, common_chat_msg & msg, std::vect
     text.parse_special = true;
     mtmd_input_chunks chunks;
 
-    if(!is_app_running) return 0;
+    if (g_is_interrupted) return 0;
 
     int32_t res = mtmd_tokenize(ctx.ctx_vision.get(), chunks, text, bitmaps);
     if (res != 0) {
@@ -289,7 +289,7 @@ int main(int argc, char ** argv) {
 #endif
     }
 
-    if(!is_app_running) return 130;
+    if (g_is_interrupted) return 130;
 
     if (is_single_turn) {
         g_is_generating = true;
@@ -302,7 +302,7 @@ int main(int argc, char ** argv) {
         if (eval_message(ctx, msg, params.image, true)) {
             return 1;
         }
-        if (is_app_running && generate_response(ctx, smpl, n_predict)) {
+        if (g_is_interrupted && generate_response(ctx, smpl, n_predict)) {
             return 1;
         }
 
@@ -317,13 +317,13 @@ int main(int argc, char ** argv) {
         std::vector<std::string> images_fname;
         std::string content;
 
-        while (is_app_running) {
+        while (!g_is_interrupted) {
             g_is_generating = false;
             LOG("\n> ");
             console::set_display(console::user_input);
             std::string line;
             console::readline(line, false);
-            if(!is_app_running) break;
+            if (g_is_interrupted) break;
             console::set_display(console::reset);
             line = string_strip(line);
             if (line.empty()) {
@@ -351,7 +351,7 @@ int main(int argc, char ** argv) {
             msg.role = "user";
             msg.content = content;
             int ret = eval_message(ctx, msg, images_fname, is_first_msg);
-            if(!is_app_running) break;
+            if (g_is_interrupted) break;
             if (ret == 2) {
                 // non-fatal error
                 images_fname.clear();
@@ -369,7 +369,7 @@ int main(int argc, char ** argv) {
             is_first_msg = false;
         }
     }
-    if(!is_app_running) LOG("\nInterrupted by user\n");
+    if (g_is_interrupted) LOG("\nInterrupted by user\n");
     llama_perf_context_print(ctx.lctx);
-    return is_app_running ? 0 : 130;
+    return g_is_interrupted ? 130 : 0;
 }
