@@ -215,7 +215,6 @@ static int eval_message(mtmd_cli_context & ctx, common_chat_msg & msg, std::vect
     LOG_DBG("formatted_chat.prompt: %s\n", formatted_chat.prompt.c_str());
 
     for (auto & fname : images_fname) {
-        if (g_is_interrupted) return 0;
         mtmd_bitmap bitmap;
         if (mtmd_helper_bitmap_init_from_file(fname.c_str(), bitmap)) {
             LOG_ERR("Unable to load image %s\n", fname.c_str());
