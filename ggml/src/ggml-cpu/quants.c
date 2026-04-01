@@ -185,6 +185,7 @@ void ggml_vec_dot_q1_0_g128_q8_0_generic(int n, float * GGML_RESTRICT s, size_t 
         
         float sumi = 0.0f;
 
+        // Process 4 Q8_0 blocks (4 * 32 = 128 elements)
         for (int k = 0; k < 4; k++) {
             const float d1 = GGML_FP16_TO_FP32(y[i*4 + k].d);
 
@@ -195,8 +196,11 @@ void ggml_vec_dot_q1_0_g128_q8_0_generic(int n, float * GGML_RESTRICT s, size_t 
                 const int byte_index = bit_index / 8;
                 const int bit_offset = bit_index % 8;
 
+                // Extract bit: 1 = +1, 0 = -1
                 const int xi = ((x[i].qs[byte_index] >> bit_offset) & 1) ? 1 : -1;
-                sumi_block += xi * y[i*4 + k].qs[j];
+                const int yi = y[i*4 + k].qs[j];
+
+                sumi_block += xi * yi;
             }
 
             sumi += d1 * sumi_block;
