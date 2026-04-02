@@ -274,6 +274,25 @@ static inline __m256 quad_mx_delta_float(const uint8_t x0, const float y0, const
 }
 #endif
 #elif defined(__SSSE3__)
+static inline int hsum_i32_4(const __m128i a) {
+    const __m128i hi64 = _mm_unpackhi_epi64(a, a);
+    const __m128i sum64 = _mm_add_epi32(hi64, a);
+    const __m128i hi32  = _mm_shuffle_epi32(sum64, _MM_SHUFFLE(2, 3, 0, 1));
+    return _mm_cvtsi128_si32(_mm_add_epi32(sum64, hi32));
+}
+
+static inline __m128i bytes_from_bits_16(const uint8_t * x) {
+    uint16_t x16;
+    memcpy(&x16, x, sizeof(uint16_t));
+
+    const __m128i shuf_mask = _mm_set_epi64x(0x0101010101010101, 0x0000000000000000);
+    __m128i bytes = _mm_shuffle_epi8(_mm_set1_epi16((short) x16), shuf_mask);
+    const __m128i bit_mask = _mm_set_epi64x(0x7fbfdfeff7fbfdfe, 0x7fbfdfeff7fbfdfe);
+    bytes = _mm_or_si128(bytes, bit_mask);
+
+    return _mm_cmpeq_epi8(bytes, _mm_set1_epi64x(-1));
+}
+
 // horizontally add 4x4 floats
 static inline float hsum_float_4x4(const __m128 a, const __m128 b, const __m128 c, const __m128 d) {
     __m128 res_0 =_mm_hadd_ps(a, b);
@@ -706,6 +725,88 @@ void ggml_vec_dot_q1_0_g128_q8_0(int n, float * GGML_RESTRICT s, size_t bs, cons
         q = _mm_add_ss(q, _mm_movehdup_ps(q));
         *s = _mm_cvtss_f32(q);
     }
+#elif defined(__AVX2__)
+    const __m256i ones_8 = _mm256_set1_epi8(1);
+    __m256 acc = _mm256_setzero_ps();
+
+    for (int ib = 0; ib < nb; ++ib) {
+        const float d0 = GGML_CPU_FP16_TO_FP32(x[ib].d);
+        __m256 acc_block = _mm256_setzero_ps();
+
+        for (int k = 0; k < 4; ++k) {
+            const block_q8_0 * GGML_RESTRICT yb = &y[ib * 4 + k];
+            const float d1 = GGML_CPU_FP16_TO_FP32(yb->d);
+            const __m256i bit_mask = bytes_from_bits_32(&x[ib].qs[k * 4]);
+            const __m256i bit_value = _mm256_and_si256(bit_mask, ones_8);
+            const __m256i qx = _mm256_sub_epi8(_mm256_add_epi8(bit_value, bit_value), ones_8);
+            const __m256i qy = _mm256_loadu_si256((const __m256i *) yb->qs);
+            const __m256 q = mul_sum_i8_pairs_float(qx, qy);
+
+            acc_block = _mm256_add_ps(acc_block, _mm256_mul_ps(_mm256_set1_ps(d1), q));
+        }
+
+        acc = _mm256_add_ps(acc, _mm256_mul_ps(_mm256_set1_ps(d0), acc_block));
+    }
+
+    *s = hsum_float_8(acc);
+#elif defined(__AVX__)
+    const __m128i ones_8 = _mm_set1_epi8(1);
+    __m256 acc = _mm256_setzero_ps();
+
+    for (int ib = 0; ib < nb; ++ib) {
+        const float d0 = GGML_CPU_FP16_TO_FP32(x[ib].d);
+        __m256 acc_block = _mm256_setzero_ps();
+
+        for (int k = 0; k < 4; ++k) {
+            const block_q8_0 * GGML_RESTRICT yb = &y[ib * 4 + k];
+            const float d1 = GGML_CPU_FP16_TO_FP32(yb->d);
+            const __m256i bit_mask = bytes_from_bits_32(&x[ib].qs[k * 4]);
+            const __m128i bit_mask_0 = _mm256_castsi256_si128(bit_mask);
+            const __m128i bit_mask_1 = _mm256_extractf128_si256(bit_mask, 1);
+            const __m128i bit_value_0 = _mm_and_si128(bit_mask_0, ones_8);
+            const __m128i bit_value_1 = _mm_and_si128(bit_mask_1, ones_8);
+            const __m128i qx_0 = _mm_sub_epi8(_mm_add_epi8(bit_value_0, bit_value_0), ones_8);
+            const __m128i qx_1 = _mm_sub_epi8(_mm_add_epi8(bit_value_1, bit_value_1), ones_8);
+            const __m128i qy_0 = _mm_loadu_si128((const __m128i *) &yb->qs[0]);
+            const __m128i qy_1 = _mm_loadu_si128((const __m128i *) &yb->qs[16]);
+            const __m256i qx = MM256_SET_M128I(qx_1, qx_0);
+            const __m256i qy = MM256_SET_M128I(qy_1, qy_0);
+            const __m256 q = mul_sum_i8_pairs_float(qx, qy);
+
+            acc_block = _mm256_add_ps(acc_block, _mm256_mul_ps(_mm256_set1_ps(d1), q));
+        }
+
+        acc = _mm256_add_ps(acc, _mm256_mul_ps(_mm256_set1_ps(d0), acc_block));
+    }
+
+    *s = hsum_float_8(acc);
+#elif defined(__SSSE3__)
+    const __m128i ones_8 = _mm_set1_epi8(1);
+    float sumf = 0.0f;
+
+    for (int ib = 0; ib < nb; ++ib) {
+        const float d0 = GGML_CPU_FP16_TO_FP32(x[ib].d);
+
+        for (int k = 0; k < 4; ++k) {
+            const block_q8_0 * GGML_RESTRICT yb = &y[ib * 4 + k];
+            const float d1 = GGML_CPU_FP16_TO_FP32(yb->d);
+
+            const __m128i bit_mask_0 = bytes_from_bits_16(&x[ib].qs[k * 4 + 0]);
+            const __m128i bit_mask_1 = bytes_from_bits_16(&x[ib].qs[k * 4 + 2]);
+            const __m128i bit_value_0 = _mm_and_si128(bit_mask_0, ones_8);
+            const __m128i bit_value_1 = _mm_and_si128(bit_mask_1, ones_8);
+            const __m128i qx_0 = _mm_sub_epi8(_mm_add_epi8(bit_value_0, bit_value_0), ones_8);
+            const __m128i qx_1 = _mm_sub_epi8(_mm_add_epi8(bit_value_1, bit_value_1), ones_8);
+            const __m128i qy_0 = _mm_loadu_si128((const __m128i *) &yb->qs[0]);
+            const __m128i qy_1 = _mm_loadu_si128((const __m128i *) &yb->qs[16]);
+            const __m128i sum_0 = mul_sum_i8_pairs(qx_0, qy_0);
+            const __m128i sum_1 = mul_sum_i8_pairs(qx_1, qy_1);
+
+            sumf += d0 * d1 * hsum_i32_4(_mm_add_epi32(sum_0, sum_1));
+        }
+    }
+
+    *s = sumf;
 #else
     // Scalar fallback
     float sumf = 0.0f;
