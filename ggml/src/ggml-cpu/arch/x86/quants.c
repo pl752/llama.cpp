@@ -747,21 +747,39 @@ void ggml_vec_dot_q1_0_g128_q8_0(int n, float * GGML_RESTRICT s, size_t bs, cons
 
     for (int ib = 0; ib < nb; ++ib) {
         const float d0 = GGML_CPU_FP16_TO_FP32(x[ib].d);
-        __m256 acc_block = _mm256_setzero_ps();
+        __m256 acc_block_0 = _mm256_setzero_ps();
+        __m256 acc_block_1 = _mm256_setzero_ps();
 
-        for (int k = 0; k < 4; ++k) {
-            const block_q8_0 * GGML_RESTRICT yb = &y[ib * 4 + k];
-            const float d1 = GGML_CPU_FP16_TO_FP32(yb->d);
-            const __m256i bit_mask = bytes_from_bits_32(&x[ib].qs[k * 4]);
-            const __m256i bit_value = _mm256_and_si256(bit_mask, ones_8);
-            const __m256i qx = _mm256_sub_epi8(_mm256_add_epi8(bit_value, bit_value), ones_8);
-            const __m256i qy = _mm256_loadu_si256((const __m256i *) yb->qs);
-            const __m256 q = mul_sum_i8_pairs_float(qx, qy);
+        for (int k = 0; k < 4; k += 2) {
+            const block_q8_0 * GGML_RESTRICT yb_0 = &y[ib * 4 + k + 0];
+            const block_q8_0 * GGML_RESTRICT yb_1 = &y[ib * 4 + k + 1];
+            const __m256i bit_mask_0 = bytes_from_bits_32(&x[ib].qs[(k + 0) * 4]);
+            const __m256i bit_mask_1 = bytes_from_bits_32(&x[ib].qs[(k + 1) * 4]);
+            const __m256i bit_value_0 = _mm256_and_si256(bit_mask_0, ones_8);
+            const __m256i bit_value_1 = _mm256_and_si256(bit_mask_1, ones_8);
+            const __m256i qx_0 = _mm256_sub_epi8(_mm256_add_epi8(bit_value_0, bit_value_0), ones_8);
+            const __m256i qx_1 = _mm256_sub_epi8(_mm256_add_epi8(bit_value_1, bit_value_1), ones_8);
+            const __m256i qy_0 = _mm256_loadu_si256((const __m256i *) yb_0->qs);
+            const __m256i qy_1 = _mm256_loadu_si256((const __m256i *) yb_1->qs);
+            const __m256 q_0 = mul_sum_i8_pairs_float(qx_0, qy_0);
+            const __m256 q_1 = mul_sum_i8_pairs_float(qx_1, qy_1);
+            const __m256 d1_0 = _mm256_set1_ps(GGML_CPU_FP16_TO_FP32(yb_0->d));
+            const __m256 d1_1 = _mm256_set1_ps(GGML_CPU_FP16_TO_FP32(yb_1->d));
 
-            acc_block = _mm256_add_ps(acc_block, _mm256_mul_ps(_mm256_set1_ps(d1), q));
+#if defined(__FMA__)
+            acc_block_0 = ggml_fmadd_ps256(d1_0, q_0, acc_block_0);
+            acc_block_1 = ggml_fmadd_ps256(d1_1, q_1, acc_block_1);
+#else
+            acc_block_0 = _mm256_add_ps(acc_block_0, _mm256_mul_ps(d1_0, q_0));
+            acc_block_1 = _mm256_add_ps(acc_block_1, _mm256_mul_ps(d1_1, q_1));
+#endif
         }
 
-        acc = _mm256_add_ps(acc, _mm256_mul_ps(_mm256_set1_ps(d0), acc_block));
+#if defined(__FMA__)
+        acc = ggml_fmadd_ps256(_mm256_set1_ps(d0), _mm256_add_ps(acc_block_0, acc_block_1), acc);
+#else
+        acc = _mm256_add_ps(acc, _mm256_mul_ps(_mm256_set1_ps(d0), _mm256_add_ps(acc_block_0, acc_block_1)));
+#endif
     }
 
     *s = hsum_float_8(acc);
