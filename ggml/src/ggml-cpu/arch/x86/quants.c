@@ -39,6 +39,22 @@ static inline __m128i mul_sum_i8_pairs(const __m128i x, const __m128i y) {
 }
 
 #if __AVX__ || __AVX2__ || __AVX512F__
+static inline __m128 ggml_fmadd_ps128(const __m128 a, const __m128 b, const __m128 c) {
+#if defined(__FMA__)
+    return _mm_fmadd_ps(a, b, c);
+#else
+    return _mm_add_ps(_mm_mul_ps(a, b), c);
+#endif
+}
+
+static inline __m256 ggml_fmadd_ps256(const __m256 a, const __m256 b, const __m256 c) {
+#if defined(__FMA__)
+    return _mm256_fmadd_ps(a, b, c);
+#else
+    return _mm256_add_ps(_mm256_mul_ps(a, b), c);
+#endif
+}
+
 // horizontally add 8 floats
 static inline float hsum_float_8(const __m256 x) {
     __m128 res = _mm256_extractf128_ps(x, 1);
@@ -638,7 +654,7 @@ void ggml_vec_dot_q1_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const voi
         const __m256 q = mul_sum_i8_pairs_float(qx, qy);
         
         // Multiply q with scale and accumulate
-        acc = _mm256_fmadd_ps(d, q, acc);
+        acc = ggml_fmadd_ps256(d, q, acc);
     }
 
     sumf = hsum_float_8(acc);
@@ -876,7 +892,7 @@ void ggml_vec_dot_q4_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const voi
         const __m256 q = mul_sum_i8_pairs_float(qx, qy);
 
         /* Multiply q with scale and accumulate */
-        acc = _mm256_fmadd_ps( d, q, acc );
+        acc = ggml_fmadd_ps256( d, q, acc );
     }
 
     sumf = hsum_float_8(acc);
@@ -1040,7 +1056,7 @@ void ggml_vec_dot_q4_1_q8_1(int n, float * GGML_RESTRICT s, size_t bs, const voi
 
         // Accumulate d0*d1*x*y
 #if defined(__AVX2__)
-        acc = _mm256_fmadd_ps( d0d1, xy, acc );
+        acc = ggml_fmadd_ps256( d0d1, xy, acc );
 #else
         acc = _mm256_add_ps( _mm256_mul_ps( d0d1, xy ), acc );
 #endif
@@ -1097,8 +1113,8 @@ void ggml_vec_dot_mxfp4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const vo
         const __m256i p_2 = _mm256_madd_epi16(p16_2, mone);
         const __m256 scale0 = _mm256_set1_ps(GGML_CPU_FP16_TO_FP32(y[ib + 0].d)*GGML_CPU_E8M0_TO_FP32_HALF(x[ib + 0].e));
         const __m256 scale1 = _mm256_set1_ps(GGML_CPU_FP16_TO_FP32(y[ib + 1].d)*GGML_CPU_E8M0_TO_FP32_HALF(x[ib + 1].e));
-        accum1 = _mm256_fmadd_ps(scale0, _mm256_cvtepi32_ps(p_1), accum1);
-        accum2 = _mm256_fmadd_ps(scale1, _mm256_cvtepi32_ps(p_2), accum2);
+        accum1 = ggml_fmadd_ps256(scale0, _mm256_cvtepi32_ps(p_1), accum1);
+        accum2 = ggml_fmadd_ps256(scale1, _mm256_cvtepi32_ps(p_2), accum2);
     }
 
     sumf = hsum_float_8(_mm256_add_ps(accum1, accum2));
@@ -1178,7 +1194,7 @@ void ggml_vec_dot_q5_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const voi
         const __m256 q = mul_sum_i8_pairs_float(qx, qy);
 
         /* Multiply q with scale and accumulate */
-        acc = _mm256_fmadd_ps(d, q, acc);
+        acc = ggml_fmadd_ps256(d, q, acc);
     }
 
     *s = hsum_float_8(acc);
@@ -1261,7 +1277,7 @@ void ggml_vec_dot_q5_1_q8_1(int n, float * GGML_RESTRICT s, size_t bs, const voi
 
         const __m256 q = mul_sum_us8_pairs_float(qx, qy);
 
-        acc = _mm256_fmadd_ps(q, _mm256_mul_ps(dx, dy), acc);
+        acc = ggml_fmadd_ps256(q, _mm256_mul_ps(dx, dy), acc);
     }
 
     *s = hsum_float_8(acc) + summs;
@@ -1339,7 +1355,7 @@ void ggml_vec_dot_q8_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const voi
         const __m256 q = mul_sum_i8_pairs_float(qx, qy);
 
         // Multiply q with scale and accumulate
-        acc = _mm256_fmadd_ps( d, q, acc );
+        acc = ggml_fmadd_ps256( d, q, acc );
     }
 
     sumf = hsum_float_8(acc);
@@ -1607,7 +1623,7 @@ void ggml_vec_dot_q2_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const voi
         const __m256i mins = _mm256_cvtepi8_epi16(mins8);
         const __m256i prod = _mm256_madd_epi16(mins, _mm256_loadu_si256((const __m256i*)y[i].bsums));
 
-        acc = _mm256_fmadd_ps(_mm256_broadcast_ss(&dmin), _mm256_cvtepi32_ps(prod), acc);
+        acc = ggml_fmadd_ps256(_mm256_broadcast_ss(&dmin), _mm256_cvtepi32_ps(prod), acc);
 
         const __m256i all_scales = _mm256_cvtepi8_epi16(scales8);
         const __m128i l_scales = _mm256_extracti128_si256(all_scales, 0);
@@ -1646,7 +1662,7 @@ void ggml_vec_dot_q2_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const voi
             sumi = _mm256_add_epi32(sumi, _mm256_add_epi32(p0, p2));
         }
 
-        acc = _mm256_fmadd_ps(_mm256_broadcast_ss(&d), _mm256_cvtepi32_ps(sumi), acc);
+        acc = ggml_fmadd_ps256(_mm256_broadcast_ss(&d), _mm256_cvtepi32_ps(sumi), acc);
 
     }
 
@@ -1880,7 +1896,7 @@ void ggml_vec_dot_q3_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const voi
         }
 
         // multiply with block scale and accumulate
-        acc = _mm256_fmadd_ps(_mm256_broadcast_ss(&d), _mm256_cvtepi32_ps(sumi), acc);
+        acc = ggml_fmadd_ps256(_mm256_broadcast_ss(&d), _mm256_cvtepi32_ps(sumi), acc);
 
     }
 
@@ -2084,7 +2100,7 @@ void ggml_vec_dot_q4_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const voi
         const __m256i q8sums = _mm256_loadu_si256((const __m256i*)y[i].bsums);
         const __m128i q8s = _mm_hadd_epi16(_mm256_extracti128_si256(q8sums, 0), _mm256_extracti128_si256(q8sums, 1));
         const __m128i prod = _mm_madd_epi16(_mm256_extracti128_si256(mins_and_scales, 1), q8s);
-        acc_m = _mm_fmadd_ps(_mm_set1_ps(dmin), _mm_cvtepi32_ps(prod), acc_m);
+        acc_m = ggml_fmadd_ps128(_mm_set1_ps(dmin), _mm_cvtepi32_ps(prod), acc_m);
 
         const __m128i sc128  = _mm256_extracti128_si256(mins_and_scales, 0);
         const __m256i scales = MM256_SET_M128I(sc128, sc128);
@@ -2113,7 +2129,7 @@ void ggml_vec_dot_q4_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const voi
         }
 
         __m256 vd = _mm256_set1_ps(d);
-        acc = _mm256_fmadd_ps(vd, _mm256_cvtepi32_ps(sumi), acc);
+        acc = ggml_fmadd_ps256(vd, _mm256_cvtepi32_ps(sumi), acc);
 
     }
 
@@ -2308,7 +2324,7 @@ void ggml_vec_dot_q5_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const voi
         }
 
         __m256 vd = _mm256_set1_ps(d);
-        acc = _mm256_fmadd_ps(vd, _mm256_cvtepi32_ps(sumi), acc);
+        acc = ggml_fmadd_ps256(vd, _mm256_cvtepi32_ps(sumi), acc);
 
     }
 
@@ -2513,7 +2529,7 @@ void ggml_vec_dot_q6_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const voi
 
         }
 
-        acc = _mm256_fmadd_ps(_mm256_broadcast_ss(&d), _mm256_cvtepi32_ps(sumi), acc);
+        acc = ggml_fmadd_ps256(_mm256_broadcast_ss(&d), _mm256_cvtepi32_ps(sumi), acc);
     }
 
     *s = hsum_float_8(acc);
@@ -2717,7 +2733,7 @@ void ggml_vec_dot_iq2_xxs_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const 
             sumi2 = _mm256_add_epi32(sumi2, p2);
         }
 
-        accumf = _mm256_fmadd_ps(_mm256_set1_ps(d), _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accumf);
+        accumf = ggml_fmadd_ps256(_mm256_set1_ps(d), _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accumf);
 
     }
 
@@ -2911,7 +2927,7 @@ void ggml_vec_dot_iq2_xs_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const v
             sumi2 = _mm256_add_epi32(sumi2, _mm256_madd_epi16(dot4, sc4));
         }
 
-        accumf = _mm256_fmadd_ps(_mm256_set1_ps(d), _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accumf);
+        accumf = ggml_fmadd_ps256(_mm256_set1_ps(d), _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accumf);
 
     }
 
@@ -3162,7 +3178,7 @@ void ggml_vec_dot_iq2_s_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const vo
             sumi2 = _mm256_add_epi32(sumi2, p2);
         }
 
-        accumf = _mm256_fmadd_ps(_mm256_set1_ps(d), _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accumf);
+        accumf = ggml_fmadd_ps256(_mm256_set1_ps(d), _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accumf);
 
     }
 
@@ -3321,7 +3337,7 @@ void ggml_vec_dot_iq3_xxs_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const 
             sumi2 = _mm256_add_epi32(sumi2, p2);
         }
 
-        accumf = _mm256_fmadd_ps(_mm256_set1_ps(d), _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accumf);
+        accumf = ggml_fmadd_ps256(_mm256_set1_ps(d), _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accumf);
 
     }
 
@@ -3482,7 +3498,7 @@ void ggml_vec_dot_iq3_s_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const vo
             sumi2 = _mm256_add_epi32(sumi2, p2);
         }
 
-        accumf = _mm256_fmadd_ps(_mm256_set1_ps(d), _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accumf);
+        accumf = ggml_fmadd_ps256(_mm256_set1_ps(d), _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accumf);
 
     }
 
@@ -3658,7 +3674,7 @@ void ggml_vec_dot_iq1_s_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const vo
         }
 
         const float d = y[i].d * GGML_CPU_FP16_TO_FP32(x[i].d);
-        accum = _mm256_fmadd_ps(_mm256_set1_ps(d), _mm256_cvtepi32_ps(sumi), accum);
+        accum = ggml_fmadd_ps256(_mm256_set1_ps(d), _mm256_cvtepi32_ps(sumi), accum);
         accum1 += d * sumi1;
 
     }
@@ -3827,8 +3843,8 @@ void ggml_vec_dot_iq1_m_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const vo
 
         const __m256 d = _mm256_set1_ps(y[i].d * GGML_CPU_FP16_TO_FP32(scale.f16));
 
-        accum1 = _mm256_fmadd_ps(d, _mm256_cvtepi32_ps(sumi1), accum1);
-        accum2 = _mm256_fmadd_ps(d, _mm256_cvtepi32_ps(sumi2), accum2);
+        accum1 = ggml_fmadd_ps256(d, _mm256_cvtepi32_ps(sumi1), accum1);
+        accum2 = ggml_fmadd_ps256(d, _mm256_cvtepi32_ps(sumi2), accum2);
     }
 
     *s = hsum_float_8(accum1) + IQ1M_DELTA * hsum_float_8(accum2);
@@ -3966,9 +3982,9 @@ void ggml_vec_dot_iq4_nl_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const v
         const __m256i p16_2 = mul_add_epi8(q4b_2, q8b_2);
         const __m256i p_1 = _mm256_madd_epi16(p16_1, mone);
         const __m256i p_2 = _mm256_madd_epi16(p16_2, mone);
-        accum1 = _mm256_fmadd_ps(_mm256_set1_ps(GGML_CPU_FP16_TO_FP32(y[ib + 0].d)*GGML_CPU_FP16_TO_FP32(x[ib + 0].d)),
+        accum1 = ggml_fmadd_ps256(_mm256_set1_ps(GGML_CPU_FP16_TO_FP32(y[ib + 0].d)*GGML_CPU_FP16_TO_FP32(x[ib + 0].d)),
                 _mm256_cvtepi32_ps(p_1), accum1);
-        accum2 = _mm256_fmadd_ps(_mm256_set1_ps(GGML_CPU_FP16_TO_FP32(y[ib + 1].d)*GGML_CPU_FP16_TO_FP32(x[ib + 1].d)),
+        accum2 = ggml_fmadd_ps256(_mm256_set1_ps(GGML_CPU_FP16_TO_FP32(y[ib + 1].d)*GGML_CPU_FP16_TO_FP32(x[ib + 1].d)),
                 _mm256_cvtepi32_ps(p_2), accum2);
     }
 
@@ -4056,7 +4072,7 @@ void ggml_vec_dot_iq4_xs_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const v
             sumi1 = _mm256_add_epi32(p_1, sumi1);
             sumi2 = _mm256_add_epi32(p_2, sumi2);
         }
-        accum = _mm256_fmadd_ps(_mm256_set1_ps(GGML_CPU_FP16_TO_FP32(x[ibl].d)*y[ibl].d),
+        accum = ggml_fmadd_ps256(_mm256_set1_ps(GGML_CPU_FP16_TO_FP32(x[ibl].d)*y[ibl].d),
                 _mm256_cvtepi32_ps(_mm256_add_epi32(sumi1, sumi2)), accum);
     }
 
