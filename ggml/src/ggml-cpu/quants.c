@@ -191,16 +191,6 @@ void ggml_vec_dot_q1_0_g128_q8_0_generic(int n, float * GGML_RESTRICT s, size_t 
             const float d1 = GGML_FP16_TO_FP32(yb->d);
             int sumi_block = 0;
 
-#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-            uint32_t bits;
-            memcpy(&bits, &x[i].qs[k * sizeof(bits)], sizeof(bits));
-
-            for (int j = 0; j < QK8_0; ++j) {
-                const int xi = ((int) (bits & 1U) << 1) - 1;
-                sumi_block += xi * yb->qs[j];
-                bits >>= 1;
-            }
-#else
             const uint8_t * GGML_RESTRICT bits = &x[i].qs[k * 4];
             const int8_t  * GGML_RESTRICT qy   = yb->qs;
 
@@ -215,7 +205,6 @@ void ggml_vec_dot_q1_0_g128_q8_0_generic(int n, float * GGML_RESTRICT s, size_t 
                            +  ((mask & 0x40) ? qy[6] : -qy[6])
                            +  ((mask & 0x80) ? qy[7] : -qy[7]);
             }
-#endif
 
             sumi += d1 * sumi_block;
         }
