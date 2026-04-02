@@ -852,15 +852,20 @@ void ggml_vec_dot_q1_0_g128_q8_0(int n, float * GGML_RESTRICT s, size_t bs, cons
         for (int k = 0; k < 4; k++) {
             const block_q8_0 * GGML_RESTRICT yb = &y[ib * 4 + k];
             const float d1 = GGML_CPU_FP16_TO_FP32(yb->d);
-            uint32_t bits;
             int sumi_block = 0;
+            const uint8_t * GGML_RESTRICT bits = &x[ib].qs[k * 4];
+            const int8_t  * GGML_RESTRICT qy   = yb->qs;
 
-            memcpy(&bits, &x[ib].qs[k * sizeof(bits)], sizeof(bits));
-
-            for (int j = 0; j < QK8_0; ++j) {
-                const int xi = ((int) (bits & 1U) << 1) - 1;
-                sumi_block += xi * yb->qs[j];
-                bits >>= 1;
+            for (int b = 0; b < 4; ++b, qy += 8) {
+                const unsigned mask = bits[b];
+                sumi_block += ((mask & 0x01) ? qy[0] : -qy[0])
+                           +  ((mask & 0x02) ? qy[1] : -qy[1])
+                           +  ((mask & 0x04) ? qy[2] : -qy[2])
+                           +  ((mask & 0x08) ? qy[3] : -qy[3])
+                           +  ((mask & 0x10) ? qy[4] : -qy[4])
+                           +  ((mask & 0x20) ? qy[5] : -qy[5])
+                           +  ((mask & 0x40) ? qy[6] : -qy[6])
+                           +  ((mask & 0x80) ? qy[7] : -qy[7]);
             }
 
             sumi += d1 * sumi_block;
