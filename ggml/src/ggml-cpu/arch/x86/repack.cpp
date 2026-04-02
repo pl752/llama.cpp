@@ -25,6 +25,10 @@
 #define UNUSED GGML_UNUSED
 
 #if defined(__AVX__)
+#if !defined(__FMA__)
+#define _mm256_fmadd_ps(a, b, c) _mm256_add_ps(_mm256_mul_ps((a), (b)), (c))
+#endif
+
 #if defined(__F16C__)
 #if defined(__AVX512F__)
 #define GGML_F32Cx8x2_LOAD(x, y)     _mm512_cvtph_ps(_mm256_set_m128i(_mm_loadu_si128((const __m128i *)(y)), _mm_loadu_si128((const __m128i *)(x))))
