@@ -593,6 +593,8 @@ void ggml_vec_dot_q1_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const voi
     float sumf = 0;
 
 #if defined(__AVX512BW__)
+    // AVX-512BW: widen one full Q8_0 block to int16, apply the 32 sign bits
+    // directly to y, reduce pairs with madd, then scale and accumulate in fp32.
     const __m512i ones_16 = _mm512_set1_epi16(1);
     const __m512i zero = _mm512_setzero_si512();
     __m512 acc = _mm512_setzero_ps();
@@ -609,6 +611,7 @@ void ggml_vec_dot_q1_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const voi
         acc = _mm512_fmadd_ps(_mm512_set1_ps(d), _mm512_cvtepi32_ps(sum_32), acc);
     }
 
+    // Horizontal sum: 512 → 256 → 128 → scalar
     {
         const __m256 h = _mm256_add_ps(_mm512_extractf32x8_ps(acc, 0),
                                        _mm512_extractf32x8_ps(acc, 1));
@@ -619,6 +622,8 @@ void ggml_vec_dot_q1_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const voi
         sumf = _mm_cvtss_f32(q);
     }
 #elif defined(__AVX2__)
+    // AVX2: expand the 32 packed sign bits to 32 signed bytes, run one byte-dot
+    // against the full Q8_0 block, and accumulate the scaled fp32 reduction.
     __m256 acc = _mm256_setzero_ps();
 
     for (; ib < nb; ++ib) {
@@ -634,6 +639,8 @@ void ggml_vec_dot_q1_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const voi
 
     sumf = hsum_float_8(acc);
 #elif defined(__AVX__)
+    // AVX: keep the same 32-bit sign expansion, but process the byte-domain dot
+    // as two 128-bit halves before combining them into one 256-bit reduction.
     const __m128i ones_8 = _mm_set1_epi8(1);
     __m256 acc = _mm256_setzero_ps();
 
@@ -657,6 +664,8 @@ void ggml_vec_dot_q1_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const voi
 
     sumf = hsum_float_8(acc);
 #elif defined(__SSSE3__)
+    // SSSE3: decode the two 16-bit bit chunks into two 16-byte sign vectors,
+    // perform the pairwise int8 dot in 128-bit lanes, and accumulate to scalar.
     const __m128i ones_8 = _mm_set1_epi8(1);
 
     for (; ib < nb; ++ib) {
@@ -676,6 +685,8 @@ void ggml_vec_dot_q1_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const voi
     }
 #endif
 
+    // Scalar fallback: stay byte-oriented so the packed sign bits feed four
+    // straight-line 8-value accumulations without per-element bit math.
     for (; ib < nb; ++ib) {
         const uint8_t * GGML_RESTRICT bits = x[ib].qs;
         const int8_t  * GGML_RESTRICT qy   = y[ib].qs;
@@ -758,6 +769,10 @@ void ggml_vec_dot_q1_0_g128_q8_0(int n, float * GGML_RESTRICT s, size_t bs, cons
         *s = _mm_cvtss_f32(q);
     }
 #elif defined(__AVX2__)
+    // AVX2: expand each 32-bit sign stream to 32 signed bytes, reduce two
+    // Q8_0 sub-blocks in parallel, then fold the pair into the outer block sum.
+    // Splitting the fixed 4-way inner loop into two independent accumulators
+    // gives the core more scheduling freedom than one longer dependency chain.
     const __m256i ones_8 = _mm256_set1_epi8(1);
     __m256 acc = _mm256_setzero_ps();
 
@@ -800,6 +815,8 @@ void ggml_vec_dot_q1_0_g128_q8_0(int n, float * GGML_RESTRICT s, size_t bs, cons
 
     *s = hsum_float_8(acc);
 #elif defined(__AVX__)
+    // AVX: reuse the same 32-bit sign expansion, but do the byte-domain work
+    // with two 128-bit halves before combining them into one 256-bit reduction.
     const __m128i ones_8 = _mm_set1_epi8(1);
     __m256 acc = _mm256_setzero_ps();
 
@@ -831,6 +848,8 @@ void ggml_vec_dot_q1_0_g128_q8_0(int n, float * GGML_RESTRICT s, size_t bs, cons
 
     *s = hsum_float_8(acc);
 #elif defined(__SSSE3__)
+    // SSSE3: decode two 16-bit chunks into 16 signed bytes each, run the
+    // pairwise int8 dot in 128-bit lanes, and accumulate directly to scalar.
     const __m128i ones_8 = _mm_set1_epi8(1);
     float sumf = 0.0f;
 
@@ -858,7 +877,9 @@ void ggml_vec_dot_q1_0_g128_q8_0(int n, float * GGML_RESTRICT s, size_t bs, cons
 
     *s = sumf;
 #else
-    // Scalar fallback
+    // Scalar fallback: keep the bitstream byte-oriented so each Q8_0 sub-block
+    // becomes four straight-line 8-value accumulations with no per-element
+    // divide/modulo/index arithmetic.
     float sumf = 0.0f;
 
     for (int ib = 0; ib < nb; ++ib) {

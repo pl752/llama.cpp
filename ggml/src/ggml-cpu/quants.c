@@ -137,6 +137,9 @@ void ggml_vec_dot_q1_0_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs, c
     
     float sumf = 0.0;
     
+    // Generic fallback: keep the sign stream byte-oriented and process the
+    // 32-value Q8_0 block as four explicit 8-value groups. This keeps the
+    // portable structure while avoiding per-element bit-index arithmetic.
     for (int i = 0; i < nb; i++) {
         const float d = GGML_FP16_TO_FP32(x[i].d) * GGML_FP16_TO_FP32(y[i].d);
         int sumi = 0;
@@ -179,8 +182,9 @@ void ggml_vec_dot_q1_0_g128_q8_0_generic(int n, float * GGML_RESTRICT s, size_t 
     
     float sumf = 0.0;
     
-    // Each Q1_0_g128 block has 128 elements, each Q8_0 block has 32 elements
-    // So we need 4 Q8_0 blocks per Q1_0_g128 block
+    // Generic fallback: keep the packed sign bits byte-oriented and process
+    // one Q8_0 sub-block as four explicit 8-value groups. This preserves the
+    // portable structure while avoiding per-element bit-index arithmetic.
     for (int i = 0; i < nb; i++) {
         const float d0 = GGML_FP16_TO_FP32(x[i].d);
         
